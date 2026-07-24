@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy dataset and scripts
+COPY data/ ./data/
+COPY train.py .
+COPY gen.py .
+COPY app.py .
+
+# GENERATE BOTH ARTIFACTS INSIDE THE DOCKER BUILD
+# 1. Train the model pipeline first -> creates model_artifact.pkl
+RUN python train.py
+
+# 2. Extract options/configs from the trained model -> creates categorical_options.json
+RUN python gen.py
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
