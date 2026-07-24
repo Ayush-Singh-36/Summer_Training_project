@@ -1,0 +1,23 @@
+# 1. Base Python image
+FROM python:3.11-slim
+
+# 2. Defensive environment settings
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# 3. Workdir setup
+WORKDIR /workspace
+
+# 4. Cache and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 5. Copy Streamlit app
+COPY frontend.py .
+
+# 6. Expose frontend socket
+EXPOSE 8501
+
+# 7. Start Streamlit UI
+CMD ["streamlit", "run", "frontend.py", "--server.port=8501", "--server.address=0.0.0.0"]
