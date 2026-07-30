@@ -170,22 +170,33 @@ if execute_submission:
                 # 3. Local Prediction - Unpack artifact dictionary & transform data
                 preprocessor = loaded_artifact["preprocessor"]
                 scaler = loaded_artifact["scaler"]
-                kmeans_model = loaded_artifact["kmeans_model"]
 
                 processed_data = preprocessor.transform(input_df)
                 scaled_data = scaler.transform(processed_data)
 
-                raw_pred = kmeans_model.predict(scaled_data)
-                pred_val = int(raw_pred[0])
+                # Check if artifact currently contains KMeans clustering or a Regressor model
+                if "kmeans_model" in loaded_artifact:
+                    model = loaded_artifact["kmeans_model"]
+                    raw_pred = model.predict(scaled_data)
+                    pred_val = int(raw_pred[0])
 
-                # 4. Display Results
-                st.markdown("### 📊 Inference Diagnostic Readouts")
-                st.success("✅ Local Model Inference Completed Successfully!")
+                    st.markdown("### 📊 Inference Diagnostic Readouts")
+                    st.success("✅ Local Model Inference Completed Successfully!")
+                    st.metric(
+                        label="Assigned Cluster Segment ID",
+                        value=f"Cluster {pred_val}",
+                    )
+                else:
+                    model = loaded_artifact.get("model") or loaded_artifact.get("regressor")
+                    raw_pred = model.predict(scaled_data)
+                    pred_val = float(raw_pred[0])
 
-                st.metric(
-                    label="Assigned Cluster Segment ID",
-                    value=f"Cluster {pred_val}",
-                )
+                    st.markdown("### 📊 Inference Diagnostic Readouts")
+                    st.success("✅ Local Model Inference Completed Successfully!")
+                    st.metric(
+                        label="Estimated Base MSRP / Price",
+                        value=f"${pred_val:,.2f}",
+                    )
 
             except Exception as e:
                 st.error(f"❌ Internal Model Execution Fault: {str(e)}")
