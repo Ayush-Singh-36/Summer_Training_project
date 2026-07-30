@@ -186,17 +186,31 @@ if execute_submission:
                 scaler = loaded_artifact["scaler"]
                 kmeans_model = loaded_artifact["kmeans_model"]
 
-                # Preserve DataFrame feature names to eliminate sklearn UserWarnings
-                if hasattr(preprocessor, "set_output"):
-                    preprocessor.set_output(transform="pandas")
-                if hasattr(scaler, "set_output"):
-                    scaler.set_output(transform="pandas")
-
+                # Process raw input
                 processed_data = preprocessor.transform(input_df)
-                scaled_data = scaler.transform(processed_data)
+
+                # Convert sparse output to dense array if necessary
+                if hasattr(processed_data, "toarray"):
+                    processed_data = processed_data.toarray()
+
+                # Reconstruct DataFrame with feature names to suppress sklearn UserWarnings
+                if hasattr(preprocessor, "get_feature_names_out"):
+                    cols = preprocessor.get_feature_names_out()
+                    processed_df = pd.DataFrame(processed_data, columns=cols)
+                else:
+                    processed_df = processed_data
+
+                # Scale features
+                scaled_data = scaler.transform(processed_df)
+
+                # Maintain DataFrame column names for scaled output
+                if isinstance(processed_df, pd.DataFrame):
+                    scaled_df = pd.DataFrame(scaled_data, columns=processed_df.columns)
+                else:
+                    scaled_df = scaled_data
 
                 # Get predicted cluster ID
-                raw_pred = kmeans_model.predict(scaled_data)
+                raw_pred = kmeans_model.predict(scaled_df)
                 cluster_id = int(raw_pred[0])
 
                 # Map cluster ID to estimated average price
