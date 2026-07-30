@@ -1,42 +1,64 @@
+import json
 import os
-import requests
+import pickle as pk
+import pandas as pd
 import streamlit as st
 
+# --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="EV Price Prediction Portal", 
     layout="wide"
 )
 
-# --- BACKEND URL CONFIGURATION ---
-BACKEND_BASE_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000").rstrip("/")
-PREDICT_URL = f"{BACKEND_BASE_URL}/predict"
-OPTIONS_URL_TEMPLATE = f"{BACKEND_BASE_URL}/options/{{}}"
+MODEL_PATH = os.getenv("MODEL_PATH", "model_artifact.pkl")
+OPTIONS_JSON_PATH = os.getenv("OPTIONS_JSON_PATH", "categorical_options.json")
 
 
-# --- HELPER: FETCH CATEGORICAL OPTIONS ---
-@st.cache_data(ttl=3600)
-def fetch_options_from_backend(feature_name: str):
+# --- HELPER: CACHE & LOAD MODEL ARTIFACT ---
+@st.cache_resource
+def load_model_artifact(path: str):
+    """Loads and caches the pickled model pipeline locally in memory."""
     try:
-        response = requests.get(OPTIONS_URL_TEMPLATE.format(feature_name))
-        if response.status_code == 200:
-            return response.json().get("options", [])
-        return []
-    except Exception:
-        return []
+        with open(path, "rb") as file:
+            return pk.load(file)
+    except Exception as e:
+        st.error(f"❌ Error loading pickle file from path '{path}': {e}")
+        return None
 
 
-# Load categorical dynamic choices at UI startup
-makes = fetch_options_from_backend("Make")
-models = fetch_options_from_backend("Model")
-states = fetch_options_from_backend("State")
-ev_types = fetch_options_from_backend("Electric Vehicle Type")
+# --- HELPER: CACHE & LOAD CATEGORICAL OPTIONS JSON ---
+@st.cache_data(ttl=3600)
+def load_categorical_options(json_path: str) -> dict:
+    """Reads categories directly from categorical_options.json file."""
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            st.warning(f"⚠️ Could not parse '{json_path}': {e}")
+            return {}
+    return {}
+
+
+loaded_artifact = load_model_artifact(MODEL_PATH)
+options_data = load_categorical_options(OPTIONS_JSON_PATH)
+
+# Extract lists using JSON values with robust fallback lists
+makes = options_data.get("Make", ["NISSAN", "TESLA", "CHEVROLET", "FORD"])
+models = options_data.get("Model", ["LEAF", "MODEL 3", "VOLT", "BOLT EV"])
+states = options_data.get("State", ["WA", "CA", "NY"])
+ev_types = options_data.get(
+    "Electric Vehicle Type",
+    [
+        "Battery Electric Vehicle (BEV)",
+        "Plug-in Hybrid Electric Vehicle (PHEV)",
+    ],
+)
 
 
 # --- USER INTERFACE FORM ---
 st.title("Electric Vehicle Analysis Dashboard")
-st.caption(
-    "Interactive UI for model inference connected directly to FastAPI backend with dynamic validation."
-)
+st.caption("Standalone interactive UI executing local model inference.")
 
 with st.form("ev_features_ingst_form"):
     # BLOCK A: CATEGORICAL FEATURES
@@ -44,26 +66,13 @@ with st.form("ev_features_ingst_form"):
     cat_col_1, cat_col_2 = st.columns(2)
 
     with cat_col_1:
-        ui_make = st.selectbox(
-            "Select Vehicle Make",
-            options=makes if makes else ["NISSAN", "TESLA", "CHEVROLET", "FORD"],
-        )
-        ui_model = st.selectbox(
-            "Select Vehicle Model",
-            options=models if models else ["LEAF", "MODEL 3", "VOLT", "BOLT EV"],
-        )
+        ui_make = st.selectbox("Select Vehicle Make", options=makes)
+        ui_model = st.selectbox("Select Vehicle Model", options=models)
 
     with cat_col_2:
-        ui_state = st.selectbox(
-            "Select Registration State", 
-            options=states if states else ["WA", "CA", "NY"],
-        )
+        ui_state = st.selectbox("Select Registration State", options=states)
         ui_ev_type = st.selectbox(
-            "Select Electric Vehicle Type",
-            options=ev_types if ev_types else [
-                "Battery Electric Vehicle (BEV)",
-                "Plug-in Hybrid Electric Vehicle (PHEV)",
-            ]
+            "Select Electric Vehicle Type", options=ev_types
         )
 
     st.markdown("---")
@@ -88,42 +97,46 @@ with st.form("ev_features_ingst_form"):
     execute_submission = st.form_submit_button("Submit")
 
 
-# --- NETWORK TRANSPORT & RESPONSE RENDERING ---
+# --- LOCAL INFERENCE & RESPONSE RENDERING ---
 if execute_submission:
-    payload_map = {
-        "Make": ui_make,
-        "Model": ui_model,
-        "State": ui_state,
-        "Electric_Vehicle_Type": ui_ev_type,
-        "Model_Year": int(ui_model_year),
-        "Electric_Range": float(ui_electric_range),
-    }
+    if loaded_artifact is None:
+        st.error("🔴 Model artifact missing or failed to load. Check server log/path.")
+    else:
+        with st.spinner("Processing feature vector & executing local inference..."):
+            try:
+                # 1. Map input payload keys directly to training column names
+                formatted_dict = {
+                    "Make": str(ui_make).strip(),
+                    "Model": str(ui_model).strip(),
+                    "State": str(ui_state).strip(),
+                    "Electric Vehicle Type": str(ui_ev_type).strip(),
+                    "Model Year": int(ui_model_year),
+                    "Electric Range": float(ui_electric_range),
+                }
 
-    with st.spinner("Processing feature vector... Requesting Inference..."):
-        try:
-            api_response = requests.post(PREDICT_URL, json=payload_map)
+                # 2. Replicate explicit column ordering expected by model
+                feature_order = [
+                    "Make",
+                    "Model",
+                    "State",
+                    "Electric Vehicle Type",
+                    "Model Year",
+                    "Electric Range",
+                ]
+                input_df = pd.DataFrame([formatted_dict])[feature_order]
 
-            if api_response.status_code == 200:
-                result = api_response.json()
-                predicted_price = result.get("prediction", {}).get(
-                    "predicted_price", 0.0
-                )
+                # 3. Local Prediction
+                raw_pred = loaded_artifact.predict(input_df)
+                pred_val = float(raw_pred[0])
 
+                # 4. Display Results
                 st.markdown("### 📊 Inference Diagnostic Readouts")
-                st.success("✅ Model Inference Completed Successfully!")
+                st.success("✅ Local Model Inference Completed Successfully!")
 
-                # Render continuous estimated price cleanly
                 st.metric(
                     label="Estimated Base MSRP / Price",
-                    value=f"${predicted_price:,.2f}",
+                    value=f"${pred_val:,.2f}",
                 )
 
-            else:
-                st.error(
-                    f"Backend rejected payload (HTTP {api_response.status_code}): \n\n `{api_response.text}`"
-                )
-
-        except requests.exceptions.ConnectionError:
-            st.error(
-                f"🔴 Transport Loop Broken: Unable to connect to FastAPI at `{PREDICT_URL}`."
-            )
+            except Exception as e:
+                st.error(f"❌ Internal Model Execution Fault: {str(e)}")

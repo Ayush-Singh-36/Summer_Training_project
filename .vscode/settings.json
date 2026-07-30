@@ -1,0 +1,7 @@
+{
+    "python.testing.pytestArgs": [
+        "Summer_Training_project"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}
