@@ -125,18 +125,24 @@ if execute_submission:
                 ]
                 input_df = pd.DataFrame([formatted_dict])[feature_order]
 
-                # 3. Local Prediction
-                st.write(loaded_artifact)
-                raw_pred = loaded_artifact.predict(input_df)
-                pred_val = float(raw_pred[0])
+                # 3. Local Prediction - Unpack artifact dictionary & transform data
+                preprocessor = loaded_artifact["preprocessor"]
+                scaler = loaded_artifact["scaler"]
+                kmeans_model = loaded_artifact["kmeans_model"]
+
+                processed_data = preprocessor.transform(input_df)
+                scaled_data = scaler.transform(processed_data)
+
+                raw_pred = kmeans_model.predict(scaled_data)
+                pred_val = int(raw_pred[0])
 
                 # 4. Display Results
                 st.markdown("### 📊 Inference Diagnostic Readouts")
                 st.success("✅ Local Model Inference Completed Successfully!")
 
                 st.metric(
-                    label="Estimated Base MSRP / Price",
-                    value=f"${pred_val:,.2f}",
+                    label="Assigned Cluster Segment ID",
+                    value=f"Cluster {pred_val}",
                 )
 
             except Exception as e:
