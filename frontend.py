@@ -14,13 +14,43 @@ MODEL_PATH = os.getenv("MODEL_PATH", "model_artifact.pkl")
 OPTIONS_JSON_PATH = os.getenv("OPTIONS_JSON_PATH", "categorical_options.json")
 
 
+# --- HELPER: PATCH LEGACY ENCODERS FOR VERSION MISMATCHES ---
+def patch_legacy_encoders(obj):
+    """Dynamically patches unpickled objects for compatibility across category_encoders versions."""
+    if obj is None:
+        return
+    
+    if isinstance(obj, dict):
+        for v in obj.values():
+            patch_legacy_encoders(v)
+        return
+
+    # Handle Scikit-Learn ColumnTransformers / Pipelines
+    if hasattr(obj, "transformers_"):
+        for _, trans, _ in obj.transformers_:
+            patch_legacy_encoders(trans)
+    if hasattr(obj, "named_transformers_"):
+        for trans in obj.named_transformers_.values():
+            patch_legacy_encoders(trans)
+
+    # Handle nested category_encoders (e.g. TargetEncoder holding an ordinal_encoder)
+    if hasattr(obj, "ordinal_encoder"):
+        patch_legacy_encoders(obj.ordinal_encoder)
+
+    # Inject missing index_start attribute if missing on OrdinalEncoder
+    if "OrdinalEncoder" in obj.__class__.__name__ and not hasattr(obj, "index_start"):
+        setattr(obj, "index_start", 1)
+
+
 # --- HELPER: CACHE & LOAD MODEL ARTIFACT ---
 @st.cache_resource
 def load_model_artifact(path: str):
-    """Loads and caches the pickled model pipeline locally in memory."""
+    """Loads, patches, and caches the pickled model pipeline locally in memory."""
     try:
         with open(path, "rb") as file:
-            return pk.load(file)
+            artifact = pk.load(file)
+            patch_legacy_encoders(artifact)
+            return artifact
     except Exception as e:
         st.error(f"❌ Error loading pickle file from path '{path}': {e}")
         return None
@@ -54,7 +84,7 @@ cafv_options = options_data.get(
     [
         "Clean Alternative Fuel Vehicle Eligible",
         "Eligibility unknown as battery range has not been researched",
-        "Not eligible due to low range"
+        "Not eligible due to low range",
     ],
 )
 ev_types = options_data.get(
