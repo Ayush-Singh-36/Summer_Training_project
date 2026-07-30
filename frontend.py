@@ -13,8 +13,7 @@ st.set_page_config(
 MODEL_PATH = os.getenv("MODEL_PATH", "model_artifact.pkl")
 OPTIONS_JSON_PATH = os.getenv("OPTIONS_JSON_PATH", "categorical_options.json")
 
-# --- OPTION A: CLUSTER-TO-PRICE LOOKUP TABLE ---
-# Maps K-Means Cluster IDs (0 to 9) to representative average market prices (MSRP)
+# --- CLUSTER-TO-PRICE LOOKUP TABLE ---
 CLUSTER_PRICE_MAP = {
     0: 28500.00,
     1: 34000.00,
@@ -186,6 +185,12 @@ if execute_submission:
                 preprocessor = loaded_artifact["preprocessor"]
                 scaler = loaded_artifact["scaler"]
                 kmeans_model = loaded_artifact["kmeans_model"]
+
+                # Preserve DataFrame feature names to eliminate sklearn UserWarnings
+                if hasattr(preprocessor, "set_output"):
+                    preprocessor.set_output(transform="pandas")
+                if hasattr(scaler, "set_output"):
+                    scaler.set_output(transform="pandas")
 
                 processed_data = preprocessor.transform(input_df)
                 scaled_data = scaler.transform(processed_data)
