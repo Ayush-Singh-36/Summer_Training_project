@@ -47,6 +47,16 @@ options_data = load_categorical_options(OPTIONS_JSON_PATH)
 makes = options_data.get("Make", ["NISSAN", "TESLA", "CHEVROLET", "FORD"])
 models = options_data.get("Model", ["LEAF", "MODEL 3", "VOLT", "BOLT EV"])
 states = options_data.get("State", ["WA", "CA", "NY"])
+counties = options_data.get("County", ["King", "Pierce", "Snohomish", "Unknown"])
+cities = options_data.get("City", ["Seattle", "Tacoma", "Bellevue", "Unknown"])
+cafv_options = options_data.get(
+    "Clean Alternative Fuel Vehicle (CAFV) Eligibility",
+    [
+        "Clean Alternative Fuel Vehicle Eligible",
+        "Eligibility unknown as battery range has not been researched",
+        "Not eligible due to low range"
+    ],
+)
 ev_types = options_data.get(
     "Electric Vehicle Type",
     [
@@ -63,7 +73,7 @@ st.caption("Standalone interactive UI executing local model inference.")
 with st.form("ev_features_ingst_form"):
     # BLOCK A: CATEGORICAL FEATURES
     st.subheader("📁 Categorical Vehicle Parameters")
-    cat_col_1, cat_col_2 = st.columns(2)
+    cat_col_1, cat_col_2, cat_col_3 = st.columns(3)
 
     with cat_col_1:
         ui_make = st.selectbox("Select Vehicle Make", options=makes)
@@ -71,9 +81,16 @@ with st.form("ev_features_ingst_form"):
 
     with cat_col_2:
         ui_state = st.selectbox("Select Registration State", options=states)
-        ui_ev_type = st.selectbox(
-            "Select Electric Vehicle Type", options=ev_types
-        )
+        ui_county = st.selectbox("Select County", options=counties)
+
+    with cat_col_3:
+        ui_city = st.selectbox("Select City", options=cities)
+        ui_ev_type = st.selectbox("Select EV Type", options=ev_types)
+
+    ui_cafv = st.selectbox(
+        "CAFV Eligibility Status", 
+        options=cafv_options
+    )
 
     st.markdown("---")
 
@@ -106,24 +123,19 @@ if execute_submission:
             try:
                 # 1. Map input payload keys directly to training column names
                 formatted_dict = {
+                    "County": str(ui_county).strip(),
+                    "City": str(ui_city).strip(),
+                    "State": str(ui_state).strip(),
                     "Make": str(ui_make).strip(),
                     "Model": str(ui_model).strip(),
-                    "State": str(ui_state).strip(),
-                    "Electric Vehicle Type": str(ui_ev_type).strip(),
                     "Model Year": int(ui_model_year),
+                    "Electric Vehicle Type": str(ui_ev_type).strip(),
+                    "Clean Alternative Fuel Vehicle (CAFV) Eligibility": str(ui_cafv).strip(),
                     "Electric Range": float(ui_electric_range),
                 }
 
-                # 2. Replicate explicit column ordering expected by model
-                feature_order = [
-                    "Make",
-                    "Model",
-                    "State",
-                    "Electric Vehicle Type",
-                    "Model Year",
-                    "Electric Range",
-                ]
-                input_df = pd.DataFrame([formatted_dict])[feature_order]
+                # 2. Convert payload to DataFrame
+                input_df = pd.DataFrame([formatted_dict])
 
                 # 3. Local Prediction - Unpack artifact dictionary & transform data
                 preprocessor = loaded_artifact["preprocessor"]
