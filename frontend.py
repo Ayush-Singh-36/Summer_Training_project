@@ -126,6 +126,7 @@ if execute_submission:
                 input_df = pd.DataFrame([formatted_dict])[feature_order]
 
                 # 3. Local Prediction
+                st.write(loaded_artifact)
                 raw_pred = loaded_artifact.predict(input_df)
                 pred_val = float(raw_pred[0])
 
