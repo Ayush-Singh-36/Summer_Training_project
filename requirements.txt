@@ -1,8 +1,4 @@
-fastapi[standard]
-uvicorn
 streamlit
-requests
-pydantic
 scikit-learn == 1.6.1
 numpy
 pandas
