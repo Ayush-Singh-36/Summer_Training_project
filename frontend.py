@@ -189,14 +189,15 @@ if execute_submission:
                 # Process raw input
                 processed_data = preprocessor.transform(input_df)
 
-                # Convert sparse output to dense array if necessary
+                # Convert sparse matrix output to dense array if necessary
                 if hasattr(processed_data, "toarray"):
                     processed_data = processed_data.toarray()
 
-                # Reconstruct DataFrame with feature names to suppress sklearn UserWarnings
+                # Reconstruct DataFrame & strip transformer prefixes (e.g. 'onehot__', 'target__')
                 if hasattr(preprocessor, "get_feature_names_out"):
-                    cols = preprocessor.get_feature_names_out()
-                    processed_df = pd.DataFrame(processed_data, columns=cols)
+                    raw_cols = preprocessor.get_feature_names_out()
+                    clean_cols = [c.split("__", 1)[-1] if "__" in c else c for c in raw_cols]
+                    processed_df = pd.DataFrame(processed_data, columns=clean_cols)
                 else:
                     processed_df = processed_data
 
