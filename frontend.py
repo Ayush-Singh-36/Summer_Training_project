@@ -1,237 +1,123 @@
-import json
 import os
-import pickle as pk
+import json
+import joblib
 import pandas as pd
 import streamlit as st
+from pathlib import Path
 
-# --- PAGE CONFIGURATION ---
+# Page configuration
 st.set_page_config(
-    page_title="EV Price Prediction Portal", 
-    layout="wide"
+    page_title="EV Price Prediction Dashboard",
+    page_icon="⚡",
+    layout="centered"
 )
 
-MODEL_PATH = os.getenv("MODEL_PATH", "model_artifact.pkl")
-OPTIONS_JSON_PATH = os.getenv("OPTIONS_JSON_PATH", "categorical_options.json")
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "model_artifact.pkl"
+OPTIONS_JSON_PATH = BASE_DIR / "categorical_options.json"
 
-# --- CLUSTER-TO-PRICE LOOKUP TABLE ---
-CLUSTER_PRICE_MAP = {
-    0: 28500.00,
-    1: 34000.00,
-    2: 41500.00,
-    3: 48000.00,
-    4: 31000.00,
-    5: 55000.00,  # Cluster 5 average price
-    6: 62500.00,
-    7: 76000.00,
-    8: 38500.00,
-    9: 89000.00,
-}
-
-
-# --- HELPER: PATCH LEGACY ENCODERS FOR VERSION MISMATCHES ---
-def patch_legacy_encoders(obj):
-    """Dynamically patches unpickled objects for compatibility across category_encoders versions."""
-    if obj is None:
-        return
-    
-    if isinstance(obj, dict):
-        for v in obj.values():
-            patch_legacy_encoders(v)
-        return
-
-    # Handle Scikit-Learn ColumnTransformers / Pipelines
-    if hasattr(obj, "transformers_"):
-        for _, trans, _ in obj.transformers_:
-            patch_legacy_encoders(trans)
-    if hasattr(obj, "named_transformers_"):
-        for trans in obj.named_transformers_.values():
-            patch_legacy_encoders(trans)
-
-    # Handle nested category_encoders (e.g. TargetEncoder holding an ordinal_encoder)
-    if hasattr(obj, "ordinal_encoder"):
-        patch_legacy_encoders(obj.ordinal_encoder)
-
-    # Inject missing index_start attribute if missing on OrdinalEncoder
-    if "OrdinalEncoder" in obj.__class__.__name__ and not hasattr(obj, "index_start"):
-        setattr(obj, "index_start", 1)
-
-
-# --- HELPER: CACHE & LOAD MODEL ARTIFACT ---
 @st.cache_resource
-def load_model_artifact(path: str):
-    """Loads, patches, and caches the pickled model pipeline locally in memory."""
+def load_artifacts():
     try:
-        with open(path, "rb") as file:
-            artifact = pk.load(file)
-            patch_legacy_encoders(artifact)
-            return artifact
+        if MODEL_PATH.exists():
+            return joblib.load(MODEL_PATH)
+        return None
     except Exception as e:
-        st.error(f"❌ Error loading pickle file from path '{path}': {e}")
+        st.error(f"Error loading model artifact: {e}")
         return None
 
-
-# --- HELPER: CACHE & LOAD CATEGORICAL OPTIONS JSON ---
 @st.cache_data(ttl=3600)
-def load_categorical_options(json_path: str) -> dict:
-    """Reads categories directly from categorical_options.json file."""
-    if os.path.exists(json_path):
+def load_categorical_options():
+    if OPTIONS_JSON_PATH.exists():
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
+            with open(OPTIONS_JSON_PATH, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            st.warning(f"⚠️ Could not parse '{json_path}': {e}")
+            st.error(f"Error loading categorical options JSON: {e}")
             return {}
     return {}
 
+artifacts = load_artifacts()
+options_data = load_categorical_options()
 
-loaded_artifact = load_model_artifact(MODEL_PATH)
-options_data = load_categorical_options(OPTIONS_JSON_PATH)
+st.title("⚡ Electric Vehicle (EV) Price Prediction")
+st.write("Enter the vehicle specifications below. Dropdown options are dynamically loaded from `categorical_options.json`.")
 
-# Extract lists using JSON values with robust fallback lists
-makes = options_data.get("Make", ["NISSAN", "TESLA", "CHEVROLET", "FORD"])
-models = options_data.get("Model", ["LEAF", "MODEL 3", "VOLT", "BOLT EV"])
-states = options_data.get("State", ["WA", "CA", "NY"])
-counties = options_data.get("County", ["King", "Pierce", "Snohomish", "Unknown"])
-cities = options_data.get("City", ["Seattle", "Tacoma", "Bellevue", "Unknown"])
-cafv_options = options_data.get(
-    "Clean Alternative Fuel Vehicle (CAFV) Eligibility",
-    [
-        "Clean Alternative Fuel Vehicle Eligible",
-        "Eligibility unknown as battery range has not been researched",
-        "Not eligible due to low range",
-    ],
-)
-ev_types = options_data.get(
-    "Electric Vehicle Type",
-    [
-        "Battery Electric Vehicle (BEV)",
-        "Plug-in Hybrid Electric Vehicle (PHEV)",
-    ],
-)
+if artifacts is None:
+    st.warning("⚠️ Could not find or load `model_artifact.pkl`. Please ensure it is in the same directory.")
+else:
+    preprocessor = artifacts.get('preprocessor')
+    scaler = artifacts.get('scaler')
+    model = artifacts.get('kmeans_model') or artifacts.get('model')  # Supporting general model key naming
 
+    # Dynamically fetch unique choices from categorical_options.json with fallbacks
+    counties = options_data.get('County', ["Unknown"])
+    cities = options_data.get('City', ["Unknown"])
+    states = options_data.get('State', ["WA"])
+    makes = options_data.get('Make', ["TESLA", "NISSAN"])
+    models = options_data.get('Model', ["UNKNOWN"])
+    ev_types = options_data.get('Electric Vehicle Type', ["Battery Electric Vehicle (BEV)"])
+    cafv_options = options_data.get('Clean Alternative Fuel Vehicle (CAFV) Eligibility', ["Clean Alternative Fuel Vehicle Eligible"])
 
-# --- USER INTERFACE FORM ---
-st.title("Electric Vehicle Analysis Dashboard")
-st.caption("Standalone interactive UI executing local model inference.")
+    with st.form("ev_form"):
+        st.subheader("Vehicle Parameters")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            county = st.selectbox("County", options=counties)
+            city = st.selectbox("City", options=cities)
+            state = st.selectbox("State", options=states)
+            make = st.selectbox("Make", options=makes)
+            model_name = st.selectbox("Model", options=models)
+            
+        with col2:
+            ev_type = st.selectbox("Electric Vehicle Type", options=ev_types)
+            cafv_eligibility = st.selectbox("CAFV Eligibility", options=cafv_options)
+            model_year = st.number_input("Model Year", min_value=2010, max_value=2030, value=2023, step=1)
+            electric_range = st.number_input("Electric Range (miles)", min_value=0, max_value=500, value=250, step=5)
 
-with st.form("ev_features_ingst_form"):
-    # BLOCK A: CATEGORICAL FEATURES
-    st.subheader("📁 Categorical Vehicle Parameters")
-    cat_col_1, cat_col_2, cat_col_3 = st.columns(3)
+        submit_btn = st.form_submit_button("Predict Price")
 
-    with cat_col_1:
-        ui_make = st.selectbox("Select Vehicle Make", options=makes)
-        ui_model = st.selectbox("Select Vehicle Model", options=models)
+    # Handle form submission and model inference
+    if submit_btn:
+        # Construct input dataframe passing the exact user selections from categorical_options.json
+        input_data = pd.DataFrame({
+            'County': [county],
+            'City': [city],
+            'State': [state],
+            'Postal Code': [98101],
+            'Model Year': [model_year],
+            'Make': [str(make).upper()],
+            'Model': [model_name],
+            'Electric Vehicle Type': [str(ev_type)],
+            'Clean Alternative Fuel Vehicle (CAFV) Eligibility': [cafv_eligibility],
+            'Electric Range': [electric_range],
+            'Base MSRP': [0],
+            'Legislative District': [1],
+            'DOL Vehicle ID': [1],
+            'Vehicle Location': ['POINT(0 0)'],
+            'Electric Utility': ['UNKNOWN'],
+            '2020 Census Tract': [1]
+        })
 
-    with cat_col_2:
-        ui_state = st.selectbox("Select Registration State", options=states)
-        ui_county = st.selectbox("Select County", options=counties)
+        try:
+            # Apply transformation pipeline using saved artifact components
+            if preprocessor is not None:
+                processed_input = preprocessor.transform(input_data)
+            else:
+                processed_input = input_data
 
-    with cat_col_3:
-        ui_city = st.selectbox("Select City", options=cities)
-        ui_ev_type = st.selectbox("Select EV Type", options=ev_types)
+            if scaler is not None:
+                processed_input = scaler.transform(processed_input)
 
-    ui_cafv = st.selectbox(
-        "CAFV Eligibility Status", 
-        options=cafv_options
-    )
-
-    st.markdown("---")
-
-    # BLOCK B: NUMERICAL METRICS
-    st.subheader("🔢 Numerical Metric Parameters")
-    num_col_1, num_col_2 = st.columns(2)
-
-    with num_col_1:
-        ui_model_year = st.slider(
-            "Model Year", min_value=1990, max_value=2026, value=2020
-        )
-
-    with num_col_2:
-        ui_electric_range = st.number_input(
-            "Electric Range (Miles)",
-            min_value=0.0,
-            value=150.0,
-            step=10.0,
-        )
-
-    execute_submission = st.form_submit_button("Submit")
-
-
-# --- LOCAL INFERENCE & RESPONSE RENDERING ---
-if execute_submission:
-    if loaded_artifact is None:
-        st.error("🔴 Model artifact missing or failed to load. Check server log/path.")
-    else:
-        with st.spinner("Processing feature vector & executing local inference..."):
-            try:
-                # 1. Map input payload keys directly to training column names
-                formatted_dict = {
-                    "County": str(ui_county).strip(),
-                    "City": str(ui_city).strip(),
-                    "State": str(ui_state).strip(),
-                    "Make": str(ui_make).strip(),
-                    "Model": str(ui_model).strip(),
-                    "Model Year": int(ui_model_year),
-                    "Electric Vehicle Type": str(ui_ev_type).strip(),
-                    "Clean Alternative Fuel Vehicle (CAFV) Eligibility": str(ui_cafv).strip(),
-                    "Electric Range": float(ui_electric_range),
-                }
-
-                # 2. Convert payload to DataFrame
-                input_df = pd.DataFrame([formatted_dict])
-
-                # 3. Local Prediction - Unpack artifact dictionary & transform data
-                preprocessor = loaded_artifact["preprocessor"]
-                scaler = loaded_artifact["scaler"]
-                kmeans_model = loaded_artifact["kmeans_model"]
-
-                # Process raw input
-                processed_data = preprocessor.transform(input_df)
-
-                # Convert sparse matrix output to dense array if necessary
-                if hasattr(processed_data, "toarray"):
-                    processed_data = processed_data.toarray()
-
-                # Reconstruct DataFrame & strip transformer prefixes (e.g. 'onehot__', 'target__')
-                if hasattr(preprocessor, "get_feature_names_out"):
-                    raw_cols = preprocessor.get_feature_names_out()
-                    clean_cols = [c.split("__", 1)[-1] if "__" in c else c for c in raw_cols]
-                    processed_df = pd.DataFrame(processed_data, columns=clean_cols)
-                else:
-                    processed_df = processed_data
-
-                # Scale features
-                scaled_data = scaler.transform(processed_df)
-
-                # Maintain DataFrame column names for scaled output
-                if isinstance(processed_df, pd.DataFrame):
-                    scaled_df = pd.DataFrame(scaled_data, columns=processed_df.columns)
-                else:
-                    scaled_df = scaled_data
-
-                # Get predicted cluster ID
-                raw_pred = kmeans_model.predict(scaled_df)
-                cluster_id = int(raw_pred[0])
-
-                # Map cluster ID to estimated average price
-                estimated_price = CLUSTER_PRICE_MAP.get(cluster_id, 35000.00)
-
-                # 4. Display Results
-                st.markdown("### 📊 Inference Diagnostic Readouts")
-                st.success("✅ Local Model Inference Completed Successfully!")
-
-                col_res1, col_res2 = st.columns(2)
-                with col_res1:
-                    st.metric(
-                        label="Assigned Cluster Segment ID",
-                        value=f"Cluster {cluster_id}",
-                    )
-                with col_res2:
-                    st.metric(
-                        label="Estimated Market Price (Segment Avg)",
-                        value=f"${estimated_price:,.2f}",
-                    )
-
-            except Exception as e:
-                st.error(f"❌ Internal Model Execution Fault: {str(e)}")
+            # Generate final price prediction using model
+            if model is not None and hasattr(model, 'predict'):
+                prediction = model.predict(processed_input)
+                estimated_price = float(prediction[0])
+                st.success(f"Estimated Car Price: ${estimated_price:,.2f}")
+            else:
+                st.warning("Model prediction interface not detected in artifact bundle.")
+            
+        except Exception as e:
+            st.error(f"An error occurred during prediction: {e}")
